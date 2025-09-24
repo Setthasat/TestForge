@@ -25,6 +25,7 @@ export default function TestPage() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
+// It normalizes decoded tokens like "9)B", "10.C", "10:B", "10 C" -> "10-B"
 const parseResponse = () => {
   const lines = rawText
     .split("\n")
@@ -40,27 +41,30 @@ const parseResponse = () => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
+    // Match questions ( **Question X:** or "X.")
     const qMatch = line.match(/^(?:\*\*)?Question\s*(\d+):?\**\s*(.*)$/i);
     if (qMatch) {
       let text = qMatch[2].trim();
       let opts: string[] = [];
 
+      // Case A: options inline on same line (A) ... B) ...)
       if (/[A-D][\)\.]\s*/.test(text)) {
         const parts = text.split(/(?=[A-D][\)\.]\s*)/);
         text = parts.shift()!.trim();
         opts = parts.map((p) => p.replace(/^[A-D][\)\.]\s*/i, "").trim());
       }
 
+      // Case B: options on next 4 lines
       if (opts.length === 0) {
-        const tempOpts: string[] = [];
+        const tmp: string[] = [];
         for (let j = 1; j <= 4; j++) {
           const optLine = lines[i + j];
           const optMatch = optLine?.match(/^[A-D][\)\.]?\s*(.*)$/i);
-          if (optMatch) tempOpts.push(optMatch[1]);
+          if (optMatch) tmp.push(optMatch[1]);
         }
-        if (tempOpts.length === 4) {
-          opts = tempOpts;
-          i += 4;
+        if (tmp.length === 4) {
+          opts = tmp;
+          i += 4; // skip option lines
         }
       }
 
@@ -68,10 +72,10 @@ const parseResponse = () => {
         qList.push({ number: qNum, text, options: opts });
         qNum++;
       }
-
       continue;
     }
 
+    // Encoded Answers header
     if (/^(?:##\s*)?Encoded Answers:/i.test(line)) {
       foundEncodedHeader = true;
 
@@ -79,9 +83,7 @@ const parseResponse = () => {
       const rest = [afterHeader, ...lines.slice(i + 1)].filter(Boolean).join(" ").trim();
 
       if (!rest) {
-        setError(
-          '⚠️ Encoded Answers header found but no tokens after it. Put tokens after the header (same line or following lines).'
-        );
+        setError(' Encoded Answers header found but no tokens provided. Put tokens after the header.');
         setQuestions([]);
         setAnswers([]);
         setResponses({});
@@ -89,12 +91,13 @@ const parseResponse = () => {
         return;
       }
 
+      // split by commas or whitespace
       const rawTokens = rest.split(/[\s,]+/).filter(Boolean);
-      const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+      const base64Regex = /^[A-Za-z0-9+/]+=*$/;
 
       for (const token of rawTokens) {
         if (!base64Regex.test(token)) {
-          setError(`⚠️ Invalid token found in Encoded Answers: "${token}". Tokens must be base64 only.`);
+          setError(`Invalid token in Encoded Answers: "${token}". Only base64 tokens allowed.`);
           setQuestions([]);
           setAnswers([]);
           setResponses({});
@@ -102,7 +105,6 @@ const parseResponse = () => {
           return;
         }
 
-        // try decode
         let decoded = "";
         try {
           decoded = atob(token.trim());
@@ -115,9 +117,36 @@ const parseResponse = () => {
           return;
         }
 
-        const decMatch = decoded.match(/^(\d+)\-([A-D])$/i);
-        if (!decMatch) {
-          setError(` Decoded token has invalid format: "${decoded}". Expected "number-letter" (e.g. 10-B).`);
+        // Normalize decoded formats like "10.C", "9)B", "10:B", "10 C" or "10C"
+        // Try strict match first: digits + separator + letter
+        let num: number | null = null;
+        let letter: string | null = null;
+
+        // 1) common separators: -, ., :, ), space
+        const m1 = decoded.match(/^(\d+)\s*[-\.\:\)\s]\s*([A-D])$/i);
+        if (m1) {
+          num = Number(m1[1]);
+          letter = m1[2].toUpperCase();
+        } else {
+          // 2) direct concat like "10C"
+          const m2 = decoded.match(/^(\d+)([A-D])$/i);
+          if (m2) {
+            num = Number(m2[1]);
+            letter = m2[2].toUpperCase();
+          } else {
+            // 3) fallback: replace non-alnum with '-' then split
+            const normalized = decoded.replace(/[^0-9A-Za-z]/g, "-");
+            const parts = normalized.split("-").filter(Boolean);
+            if (parts.length >= 2) {
+              num = Number(parts[0]);
+              letter = parts[parts.length - 1].slice(0, 1).toUpperCase();
+            }
+          }
+        }
+
+        // Validate parsed values
+        if (num === null || !letter || !/^[A-D]$/.test(letter)) {
+          setError(`⚠️ Decoded token has invalid format: "${decoded}". Expected like "10-B".`);
           setQuestions([]);
           setAnswers([]);
           setResponses({});
@@ -125,11 +154,9 @@ const parseResponse = () => {
           return;
         }
 
-        const num = Number(decMatch[1]);
-        const letter = decMatch[2].toUpperCase();
-
+        // Prevent duplicates
         if (answersMap.has(num)) {
-          setError(` Duplicate answer for question ${num} found in Encoded Answers.`);
+          setError(`⚠️ Duplicate encoded answer for question ${num}.`);
           setQuestions([]);
           setAnswers([]);
           setResponses({});
@@ -140,12 +167,13 @@ const parseResponse = () => {
         answersMap.set(num, letter);
       }
 
-      break;
+      break; // done processing encoded block
     }
-  }
+  } // end for
 
+  // Post validations
   if (!foundEncodedHeader) {
-    setError('⚠️ Encoded Answers header not found. Make sure the test includes "Encoded Answers:" exactly.');
+    setError('⚠️ Encoded Answers header not found. Please include "Encoded Answers:" exactly.');
     setQuestions([]);
     setAnswers([]);
     setResponses({});
@@ -154,7 +182,7 @@ const parseResponse = () => {
   }
 
   if (qList.length === 0) {
-    setError("⚠️ No valid questions parsed. Make sure questions follow 'Question X:' and have A)–D) options.");
+    setError("⚠️ No valid questions parsed. Ensure each question uses 'Question X:' with A)–D) options.");
     setQuestions([]);
     setAnswers([]);
     setResponses({});
@@ -162,9 +190,10 @@ const parseResponse = () => {
     return;
   }
 
+  // Answers must cover all questions 1..N
   for (let n = 1; n <= qList.length; n++) {
     if (!answersMap.has(n)) {
-      setError(`⚠️ Missing encoded answer for question ${n}. Encoded Answers must include all question numbers 1..${qList.length}.`);
+      setError(`⚠️ Missing encoded answer for question ${n}.`);
       setQuestions([]);
       setAnswers([]);
       setResponses({});
@@ -173,17 +202,20 @@ const parseResponse = () => {
     }
   }
 
-  const orderedAnswers: string[] = [];
+  // Build ordered answers array ["1-A","2-B",...]
+  const ordered: string[] = [];
   for (let n = 1; n <= qList.length; n++) {
-    orderedAnswers.push(`${n}-${answersMap.get(n)}`);
+    ordered.push(`${n}-${answersMap.get(n)}`);
   }
 
+  // success
   setError(null);
   setQuestions(qList);
-  setAnswers(orderedAnswers);
+  setAnswers(ordered);
   setResponses({});
   setSubmitted(false);
 };
+
 
 
   const handleOptionSelect = (qNum: number, option: string) => {

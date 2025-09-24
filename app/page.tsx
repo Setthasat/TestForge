@@ -18,28 +18,26 @@ const generatePrompt = (topic: string): string => {
   if (!topic.trim()) return "";
 
   return `
-You are an automated test generator.
+You are to generate a multiple-choice mock test.
+
+Topic: ${topic}
 
 🟡 STRICT RULES (DO NOT BREAK):
-1. Generate EXACTLY 10 multiple-choice questions about: "${topic}".
-2. Each question MUST be in this exact format:
-   **Question X:** [Question text]
-   A) [Option A]
-   B) [Option B]
-   C) [Option C]
-   D) [Option D]
-   - Replace X with the question number (1 to 10).
-3. Always include EXACTLY 4 options (A–D). No more, no less.
-4. Do NOT include answers inline with questions.
-5. After ALL 10 questions, include a section titled EXACTLY:
-   ## Encoded Answers:
-6. Encode each correct answer as Base64 in the format "[Number]-[Letter]".
-   - Example: "1-C" → "MS1D"
-7. Place each encoded answer separated by commas or newlines.
-   Example final block:
-   ## Encoded Answers:
-   MS1D, Mi1B, Mz1A, NDE= ...
-8. Do NOT output anything else. No explanations, no extra markdown, no commentary.
+1. Write EXACTLY 10 questions.
+2. Each question MUST be numbered and formatted like:
+   **Question 1:** What is JavaScript?
+   A) Option A
+   B) Option B
+   C) Option C
+   D) Option D
+3. Always provide **exactly 4 options** labeled A)–D).
+4. Do NOT show the answer key directly.
+5. At the end, under a section titled "## Encoded Answers:", provide the correct answers encoded in Base64.
+   - Format: strictly "[QuestionNumber]-[Letter]" (dash only, no parentheses, no spaces).
+   - Example: "1-C" → encode → "MS1D"
+   - Example: "10-B" → encode → "MTAuQi" ❌ WRONG, must → "MTAxQg==" ✅
+6. Encode EACH answer separately and list them on new lines. Do NOT join them with commas or spaces.
+7. Only output in this format. No explanations, no markdown outside the required format.
 
 ---
 
@@ -48,24 +46,15 @@ You are an automated test generator.
 **Instructions:** Choose the best answer for each question. Select A, B, C, or D.
 
 ---
-**Question 1:** (your first question here)
-A) ...
-B) ...
-C) ...
-D) ...
-...
-**Question 10:** (your tenth question here)
-A) ...
-B) ...
-C) ...
-D) ...
+(questions here)
 
 ---
 
 ## Encoded Answers:
-(your Base64 answers here)
+(one base64 token per line, no commas, no spaces)
   `.trim();
 };
+
 
 export default function HomePage({
   setCurrentPage,
