@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-// 🔹   Safe AI Prompt Generator
 const generatePrompt = (topic: string): string => {
   if (!topic.trim()) return "";
 
@@ -33,11 +32,15 @@ Topic: ${topic}
 3. Always provide **exactly 4 options** labeled A)–D).
 4. Do NOT show the answer key directly.
 5. At the end, under a section titled "## Encoded Answers:", provide the correct answers encoded in Base64.
-   - Format: strictly "[QuestionNumber]-[Letter]" (dash only, no parentheses, no spaces).
-   - Example: "1-C" → encode → "MS1D"
-   - Example: "10-B" → encode → "MTAuQi" ❌ WRONG, must → "MTAxQg==" ✅
-6. Encode EACH answer separately and list them on new lines. Do NOT join them with commas or spaces.
-7. Only output in this format. No explanations, no markdown outside the required format.
+   - Format before encoding: strictly "[QuestionNumber]-[Letter]" (dash only, no spaces, no dot).
+     ✅ Example: "1-C" → encode → "MS1D"
+     ✅ Example: "10-B" → encode → "MTAtQg=="
+   - NEVER use dot, colon, parenthesis, or extra symbols (❌ "10.B" ❌ "10:B" ❌ "10)B").
+6. Encode EACH answer separately in Base64, one per line.
+   - Do NOT join them with commas or spaces.
+   - Do NOT forget padding "=" when required.
+7. If a question number is 10, it must encode as "MTAtX" form, NOT "MTAuX".
+8. Only output in this format. No explanations, no markdown outside the required format.
 
 ---
 
@@ -56,11 +59,7 @@ Topic: ${topic}
 };
 
 
-export default function HomePage({
-  setCurrentPage,
-}: {
-  setCurrentPage: (page: string) => void;
-}) {
+export default function HomePage() {
   const [topic, setTopic] = useState("");
   const [prompt, setPrompt] = useState("");
   const [msg, setMsg] = useState<string | null>(null);

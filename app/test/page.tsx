@@ -23,200 +23,178 @@ export default function TestPage() {
   const [responses, setResponses] = useState<Record<number, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [parsedOnce, setParsedOnce] = useState(false); // ✅ new state
   const router = useRouter();
 
-// It normalizes decoded tokens like "9)B", "10.C", "10:B", "10 C" -> "10-B"
-const parseResponse = () => {
-  const lines = rawText
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
+  // Parse and normalize encoded answers
+  const parseResponse = () => {
+    setParsedOnce(true); // ✅ mark parse attempt
 
-  const qList: Question[] = [];
-  const answersMap = new Map<number, string>();
+    const lines = rawText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
 
-  let qNum = 1;
-  let foundEncodedHeader = false;
+    const qList: Question[] = [];
+    const answersMap = new Map<number, string>();
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    let qNum = 1;
+    let foundEncodedHeader = false;
 
-    // Match questions ( **Question X:** or "X.")
-    const qMatch = line.match(/^(?:\*\*)?Question\s*(\d+):?\**\s*(.*)$/i);
-    if (qMatch) {
-      let text = qMatch[2].trim();
-      let opts: string[] = [];
-
-      // Case A: options inline on same line (A) ... B) ...)
-      if (/[A-D][\)\.]\s*/.test(text)) {
-        const parts = text.split(/(?=[A-D][\)\.]\s*)/);
-        text = parts.shift()!.trim();
-        opts = parts.map((p) => p.replace(/^[A-D][\)\.]\s*/i, "").trim());
-      }
-
-      // Case B: options on next 4 lines
-      if (opts.length === 0) {
-        const tmp: string[] = [];
-        for (let j = 1; j <= 4; j++) {
-          const optLine = lines[i + j];
-          const optMatch = optLine?.match(/^[A-D][\)\.]?\s*(.*)$/i);
-          if (optMatch) tmp.push(optMatch[1]);
-        }
-        if (tmp.length === 4) {
-          opts = tmp;
-          i += 4; // skip option lines
-        }
-      }
-
-      if (opts.length === 4) {
-        qList.push({ number: qNum, text, options: opts });
-        qNum++;
-      }
-      continue;
-    }
-
-    // Encoded Answers header
-    if (/^(?:##\s*)?Encoded Answers:/i.test(line)) {
-      foundEncodedHeader = true;
-
-      const afterHeader = line.replace(/^(?:##\s*)?Encoded Answers:/i, "").trim();
-      const rest = [afterHeader, ...lines.slice(i + 1)].filter(Boolean).join(" ").trim();
-
-      if (!rest) {
-        setError(' Encoded Answers header found but no tokens provided. Put tokens after the header.');
-        setQuestions([]);
-        setAnswers([]);
-        setResponses({});
-        setSubmitted(false);
-        return;
-      }
-
-      // split by commas or whitespace
-      const rawTokens = rest.split(/[\s,]+/).filter(Boolean);
-      const base64Regex = /^[A-Za-z0-9+/]+=*$/;
-
-      for (const token of rawTokens) {
-        if (!base64Regex.test(token)) {
-          setError(`Invalid token in Encoded Answers: "${token}". Only base64 tokens allowed.`);
-          setQuestions([]);
-          setAnswers([]);
-          setResponses({});
-          setSubmitted(false);
-          return;
-        }
-
-        let decoded = "";
-        try {
-          decoded = atob(token.trim());
-        } catch (e) {
-          setError(`⚠️ Failed to decode base64 token: "${token}".`);
-          setQuestions([]);
-          setAnswers([]);
-          setResponses({});
-          setSubmitted(false);
-          return;
-        }
-
-        // Normalize decoded formats like "10.C", "9)B", "10:B", "10 C" or "10C"
-        // Try strict match first: digits + separator + letter
-        let num: number | null = null;
-        let letter: string | null = null;
-
-        // 1) common separators: -, ., :, ), space
-        const m1 = decoded.match(/^(\d+)\s*[-\.\:\)\s]\s*([A-D])$/i);
-        if (m1) {
-          num = Number(m1[1]);
-          letter = m1[2].toUpperCase();
-        } else {
-          // 2) direct concat like "10C"
-          const m2 = decoded.match(/^(\d+)([A-D])$/i);
-          if (m2) {
-            num = Number(m2[1]);
-            letter = m2[2].toUpperCase();
-          } else {
-            // 3) fallback: replace non-alnum with '-' then split
-            const normalized = decoded.replace(/[^0-9A-Za-z]/g, "-");
-            const parts = normalized.split("-").filter(Boolean);
-            if (parts.length >= 2) {
-              num = Number(parts[0]);
-              letter = parts[parts.length - 1].slice(0, 1).toUpperCase();
-            }
-          }
-        }
-
-        // Validate parsed values
-        if (num === null || !letter || !/^[A-D]$/.test(letter)) {
-          setError(`⚠️ Decoded token has invalid format: "${decoded}". Expected like "10-B".`);
-          setQuestions([]);
-          setAnswers([]);
-          setResponses({});
-          setSubmitted(false);
-          return;
-        }
-
-        // Prevent duplicates
-        if (answersMap.has(num)) {
-          setError(`⚠️ Duplicate encoded answer for question ${num}.`);
-          setQuestions([]);
-          setAnswers([]);
-          setResponses({});
-          setSubmitted(false);
-          return;
-        }
-
-        answersMap.set(num, letter);
-      }
-
-      break; // done processing encoded block
-    }
-  } // end for
-
-  // Post validations
-  if (!foundEncodedHeader) {
-    setError('⚠️ Encoded Answers header not found. Please include "Encoded Answers:" exactly.');
-    setQuestions([]);
-    setAnswers([]);
-    setResponses({});
-    setSubmitted(false);
-    return;
-  }
-
-  if (qList.length === 0) {
-    setError("⚠️ No valid questions parsed. Ensure each question uses 'Question X:' with A)–D) options.");
-    setQuestions([]);
-    setAnswers([]);
-    setResponses({});
-    setSubmitted(false);
-    return;
-  }
-
-  // Answers must cover all questions 1..N
-  for (let n = 1; n <= qList.length; n++) {
-    if (!answersMap.has(n)) {
-      setError(`⚠️ Missing encoded answer for question ${n}.`);
+    const resetState = () => {
       setQuestions([]);
       setAnswers([]);
       setResponses({});
       setSubmitted(false);
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Match questions
+      const qMatch = line.match(/^(?:\*\*)?Question\s*(\d+):?\**\s*(.*)$/i);
+      if (qMatch) {
+        let text = qMatch[2].trim();
+        let opts: string[] = [];
+
+        // Case A: options inline
+        if (/[A-D][\)\.]\s*/.test(text)) {
+          const parts = text.split(/(?=[A-D][\)\.]\s*)/);
+          text = parts.shift()!.trim();
+          opts = parts.map((p) => p.replace(/^[A-D][\)\.]\s*/i, "").trim());
+        }
+
+        // Case B: options on next 4 lines
+        if (opts.length === 0) {
+          const tmp: string[] = [];
+          for (let j = 1; j <= 4; j++) {
+            const optLine = lines[i + j];
+            const optMatch = optLine?.match(/^[A-D][\)\.]?\s*(.*)$/i);
+            if (optMatch) tmp.push(optMatch[1]);
+          }
+          if (tmp.length === 4) {
+            opts = tmp;
+            i += 4;
+          }
+        }
+
+        if (opts.length === 4) {
+          qList.push({ number: qNum, text, options: opts });
+          qNum++;
+        }
+        continue;
+      }
+
+      // Encoded Answers header
+      if (/^(?:##\s*)?Encoded Answers:/i.test(line)) {
+        foundEncodedHeader = true;
+
+        const afterHeader = line
+          .replace(/^(?:##\s*)?Encoded Answers:/i, "")
+          .trim();
+        const rest = [afterHeader, ...lines.slice(i + 1)]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+        if (!rest) {
+          setError("Encoded Answers header found but no tokens provided.");
+          resetState();
+          return;
+        }
+
+        const rawTokens = rest.split(/[\s,]+/).filter(Boolean);
+
+        for (const token of rawTokens) {
+          let clean = token.trim().replace(/[^A-Za-z0-9+/=]/g, "");
+          while (clean.length % 4 !== 0) clean += "=";
+
+          let decoded = "";
+          try {
+            decoded = atob(clean);
+          } catch (e) {
+            console.warn(" Failed to decode base64 token:", token, "->", clean);
+            continue;
+          }
+
+          // Normalize decoded format
+          let num: number | null = null;
+          let letter: string | null = null;
+
+          const m1 = decoded.match(/^(\d+)\s*[-\.\:\)\s]\s*([A-D])$/i);
+          if (m1) {
+            num = Number(m1[1]);
+            letter = m1[2].toUpperCase();
+          } else {
+            const m2 = decoded.match(/^(\d+)([A-D])$/i);
+            if (m2) {
+              num = Number(m2[1]);
+              letter = m2[2].toUpperCase();
+            } else {
+              const normalized = decoded.replace(/[^0-9A-Za-z]/g, "-");
+              const parts = normalized.split("-").filter(Boolean);
+              if (parts.length >= 2) {
+                num = Number(parts[0]);
+                letter = parts[parts.length - 1].slice(0, 1).toUpperCase();
+              }
+            }
+          }
+
+          if (num && letter && /^[A-D]$/.test(letter)) {
+            if (answersMap.has(num)) {
+              console.warn(
+                " Duplicate encoded answer for question",
+                num,
+                "ignored."
+              );
+              continue;
+            }
+            answersMap.set(num, letter);
+          } else {
+            console.warn(" Ignored invalid decoded answer:", decoded);
+          }
+        }
+
+        break;
+      }
+    }
+
+    // Post validations
+    if (!foundEncodedHeader) {
+      setError(
+        'Encoded Answers header not found. Please include "Encoded Answers:".'
+      );
+      resetState();
       return;
     }
-  }
 
-  // Build ordered answers array ["1-A","2-B",...]
-  const ordered: string[] = [];
-  for (let n = 1; n <= qList.length; n++) {
-    ordered.push(`${n}-${answersMap.get(n)}`);
-  }
+    if (qList.length === 0) {
+      setError(
+        "No valid questions parsed. Ensure each question uses 'Question X:' with A)–D) options."
+      );
+      resetState();
+      return;
+    }
 
-  // success
-  setError(null);
-  setQuestions(qList);
-  setAnswers(ordered);
-  setResponses({});
-  setSubmitted(false);
-};
+    for (let n = 1; n <= qList.length; n++) {
+      if (!answersMap.has(n)) {
+        setError(`Missing encoded answer for question ${n}.`);
+        resetState();
+        return;
+      }
+    }
 
+    const ordered: string[] = [];
+    for (let n = 1; n <= qList.length; n++) {
+      ordered.push(`${n}-${answersMap.get(n)}`);
+    }
 
+    setError(null);
+    setQuestions(qList);
+    setAnswers(ordered);
+    setResponses({});
+    setSubmitted(false);
+  };
 
   const handleOptionSelect = (qNum: number, option: string) => {
     setResponses((prev) => ({ ...prev, [qNum]: option }));
@@ -258,7 +236,7 @@ const parseResponse = () => {
         </div>
       </nav>
 
-      {/* Input + Warning */}
+      {/* Input */}
       <div className="w-full flex justify-center items-center gap-6 px-6 flex-col">
         <div className="bg-gray-800/60 backdrop-blur-md p-6 rounded-xl shadow-xl border border-gray-700 w-[70%]">
           <div className="mb-6">
@@ -271,7 +249,6 @@ const parseResponse = () => {
             </p>
           </div>
 
-          {/* Input */}
           <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 shadow-lg space-y-4">
             <textarea
               className="w-full h-40 p-4 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:ring-2 focus:ring-yellow-400 focus:outline-none"
@@ -292,7 +269,9 @@ const parseResponse = () => {
                   {error}
                 </div>
               )}
-              {questions.length === 0 &&
+              {/* ✅ Only show invalid warning after parse attempt */}
+              {parsedOnce &&
+                questions.length === 0 &&
                 answers.length === 0 &&
                 rawText &&
                 !error && (
@@ -339,7 +318,12 @@ const parseResponse = () => {
             ))}
             <button
               onClick={handleSubmit}
-              className="w-full px-6 py-3 rounded-lg font-bold text-black bg-gradient-to-r from-green-400 to-emerald-400 hover:opacity-90 transition"
+              disabled={Object.keys(responses).length !== questions.length}
+              className={`w-full px-6 py-3 rounded-lg font-bold transition ${
+                Object.keys(responses).length !== questions.length
+                  ? "bg-gray-600 text-gray-400 cursor-not-allowed"
+                  : "text-black bg-gradient-to-r from-green-400 to-emerald-400 hover:opacity-90"
+              }`}
             >
               Submit Test
             </button>
@@ -371,9 +355,21 @@ const parseResponse = () => {
 
             <div className="space-y-4">
               {questions.map((q, idx) => {
-                const given = responses[q.number];
-                const correct = answers[idx]?.split("-")[1];
+                const given = responses[q.number]; // letter (A/B/C/D)
+                const correct = answers[idx]?.split("-")[1]; // correct letter
                 const isCorrect = given === correct;
+
+                // map letter -> option text
+                const givenIndex = given ? given.charCodeAt(0) - 65 : -1;
+                const correctIndex = correct ? correct.charCodeAt(0) - 65 : -1;
+
+                const givenText =
+                  givenIndex >= 0 ? `${given}. ${q.options[givenIndex]}` : "—";
+                const correctText =
+                  correctIndex >= 0
+                    ? `${correct}. ${q.options[correctIndex]}`
+                    : "—";
+
                 return (
                   <div
                     key={q.number}
@@ -391,11 +387,11 @@ const parseResponse = () => {
                     </div>
                     <p>
                       <span className="text-gray-400">Your Answer:</span>{" "}
-                      {given || "—"}
+                      {givenText}
                     </p>
                     <p>
                       <span className="text-gray-400">Correct Answer:</span>{" "}
-                      {correct}
+                      {correctText}
                     </p>
                   </div>
                 );
