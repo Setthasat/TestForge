@@ -7,7 +7,6 @@ import {
   Copy,
   ChevronRight,
   Brain,
-  FileText,
   Users,
   Trophy,
 } from "lucide-react";

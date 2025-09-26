@@ -251,7 +251,7 @@ export default function TestPage() {
 
           <div className="bg-gray-900/80 backdrop-blur rounded-xl p-6 shadow-lg space-y-4">
             <textarea
-              className="w-full h-40 p-4 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:ring-2 focus:ring-yellow-400 focus:outline-none"
+              className="w-full h-full p-4 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:ring-2 focus:ring-yellow-400 focus:outline-none"
               placeholder="Paste your AI response here..."
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
